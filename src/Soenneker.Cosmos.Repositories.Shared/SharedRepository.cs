@@ -15,6 +15,7 @@ using System.Threading.Tasks;
 using Soenneker.Documents.Typed;
 using Soenneker.Extensions.ValueTask;
 using Soenneker.Utils.MemoryStream.Abstract;
+using Soenneker.ConcurrentProcessing.Executor;
 
 namespace Soenneker.Cosmos.Repositories.Shared;
 
@@ -61,7 +62,8 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
         await DeleteIds(ids, delayMs, useQueue, cancellationToken)
             .NoSync();
 
-        Logger.LogDebug("-- COSMOS: Finished {method} (General.{type}Document)", MethodUtil.Get(), EntityType);
+        if (Logger.IsEnabled(LogLevel.Debug))
+            Logger.LogDebug("-- COSMOS: Finished {method} (General.{type}Document)", MethodUtil.Get(), EntityType);
     }
 
     public override async ValueTask DeleteAllPaged(int pageSize = DataConstants.DefaultCosmosPageSize, double? delayMs = null, bool useQueue = false,
@@ -79,18 +81,46 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
 
         await ExecuteOnGetItemsPaged(newQuery, async results =>
             {
-                Logger.LogDebug("Number of rows to be deleted in page: {rows}", results.Count);
+                if (Logger.IsEnabled(LogLevel.Debug))
+                    Logger.LogDebug("Number of rows to be deleted in page: {rows}", results.Count);
 
                 foreach (var result in results)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    await DeleteItem(result.DocumentId, result.PartitionKey, useQueue, cancellationToken)
+                    await DeleteItem(result.DocumentId!, result.PartitionKey!, useQueue, cancellationToken)
                         .NoSync();
                 }
             }, cancellationToken)
             .NoSync();
 
-        Logger.LogDebug("-- COSMOS: Finished {method} (General.{type})", MethodUtil.Get(), typeof(TDocument).Name);
+        if (Logger.IsEnabled(LogLevel.Debug))
+            Logger.LogDebug("-- COSMOS: Finished {method} (General.{type})", MethodUtil.Get(), typeof(TDocument).Name);
+    }
+
+    public virtual async ValueTask DeleteAllPagedParallel(int maxConcurrency, int pageSize = DataConstants.DefaultCosmosPageSize,
+        CancellationToken cancellationToken = default)
+    {
+        System.ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
+
+        Microsoft.Azure.Cosmos.Container container = await Container(cancellationToken).NoSync();
+        IQueryable<TDocument> query = await BuildPagedQueryable(pageSize, cancellationToken: cancellationToken).NoSync();
+        query = query.Where(c => c.EntityType == EntityType)
+                     .OrderBy(static c => c.CreatedAt);
+        IQueryable<IdPartitionPair> projected = query.Select(static c => new IdPartitionPair
+        {
+            Id = c.DocumentId!,
+            PartitionKey = c.PartitionKey!
+        });
+
+        var executor = new ConcurrentProcessingExecutor(maxConcurrency, Logger);
+
+        await ExecuteOnGetItemsPaged(projected, async results =>
+        {
+            await executor.Execute(results, async (result, ct) =>
+            {
+                await DeleteItemWithContainer(container, result.Id!, result.PartitionKey!, useQueue: false, ct).NoSync();
+            }, cancellationToken).NoSync();
+        }, cancellationToken).NoSync();
     }
 }

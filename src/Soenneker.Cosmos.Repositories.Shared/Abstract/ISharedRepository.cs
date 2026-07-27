@@ -56,4 +56,13 @@ public interface ISharedRepository<TDocument> : ICosmosRepository<TDocument> whe
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task that represents the asynchronous operation.</returns>
     new ValueTask DeleteAllPaged(int pageSize, double? delayMs, bool useQueue, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes all documents of this shared entity type page-by-page with bounded parallelism.
+    /// </summary>
+    /// <param name="maxConcurrency">The maximum number of concurrent delete operations.</param>
+    /// <param name="pageSize">The page size.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
+    ValueTask DeleteAllPagedParallel(int maxConcurrency, int pageSize, CancellationToken cancellationToken = default);
 }
