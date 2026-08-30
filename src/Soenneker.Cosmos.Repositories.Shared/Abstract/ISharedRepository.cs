@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace Soenneker.Cosmos.Repositories.Shared.Abstract;
 
 /// <summary>
-/// A data persistence abstraction layer for Cosmos DB containers that have multiple document types
+/// Defines repository operations for one typed-document discriminator in a Cosmos container shared by multiple document types.
 /// </summary>
 public interface ISharedRepository<TDocument> : ICosmosRepository<TDocument> where TDocument : class
 {
@@ -22,12 +22,28 @@ public interface ISharedRepository<TDocument> : ICosmosRepository<TDocument> whe
     new ValueTask<List<TDocument>> GetAll(double? delayMs, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Checks for shared Repository.
+    /// Checks whether any document exists for this repository's entity type.
     /// </summary>
     /// <param name="cancellationToken">Token used to cancel the operation.</param>
     /// <returns>true if retrieves any from the Shared Repository; otherwise, false.</returns>
     [Pure]
     new ValueTask<bool> Any(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Checks whether no documents exist for this repository's entity type.
+    /// </summary>
+    /// <param name="cancellationToken">Token used to cancel the operation.</param>
+    /// <returns><see langword="true"/> when no matching document exists; otherwise, <see langword="false"/>.</returns>
+    [Pure]
+    new ValueTask<bool> None(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Counts documents belonging to this repository's entity type.
+    /// </summary>
+    /// <param name="cancellationToken">Token used to cancel the operation.</param>
+    /// <returns>The number of matching documents.</returns>
+    [Pure]
+    new ValueTask<int> Count(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets all ids.
@@ -64,5 +80,5 @@ public interface ISharedRepository<TDocument> : ICosmosRepository<TDocument> whe
     /// <param name="pageSize">Maximum number of items to request per page.</param>
     /// <param name="cancellationToken">Token used to cancel the operation.</param>
     /// <returns>A task that completes after the targeted files have been deleted.</returns>
-    ValueTask DeleteAllPagedParallel(int maxConcurrency, int pageSize, CancellationToken cancellationToken = default);
+    new ValueTask DeleteAllPagedParallel(int maxConcurrency, int pageSize, CancellationToken cancellationToken = default);
 }

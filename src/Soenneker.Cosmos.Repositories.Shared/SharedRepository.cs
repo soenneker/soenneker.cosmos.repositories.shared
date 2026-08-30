@@ -19,7 +19,6 @@ using Soenneker.ConcurrentProcessing.Executor;
 
 namespace Soenneker.Cosmos.Repositories.Shared;
 
-/// <inheritdoc cref="ISharedRepository{TDocument}"/>
 public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>, ISharedRepository<TDocument> where TDocument : TypedDocument
 {
     protected abstract string EntityType { get; }
@@ -38,6 +37,34 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
         query = query.Where(c => c.EntityType == EntityType);
 
         return await GetItems(query, delayMs, cancellationToken)
+            .NoSync();
+    }
+
+    public new async ValueTask<bool> Any(CancellationToken cancellationToken = default)
+    {
+        IQueryable<TDocument> query = await BuildQueryable(null, cancellationToken)
+            .NoSync();
+
+        query = query.Where(c => c.EntityType == EntityType);
+
+        return await Exists(query, cancellationToken)
+            .NoSync();
+    }
+
+    public new async ValueTask<bool> None(CancellationToken cancellationToken = default)
+    {
+        return !await Any(cancellationToken)
+            .NoSync();
+    }
+
+    public new async ValueTask<int> Count(CancellationToken cancellationToken = default)
+    {
+        IQueryable<TDocument> query = await BuildQueryable(null, cancellationToken)
+            .NoSync();
+
+        query = query.Where(c => c.EntityType == EntityType);
+
+        return await Count(query, cancellationToken)
             .NoSync();
     }
 
@@ -98,7 +125,7 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
             Logger.LogDebug("-- COSMOS: Finished {method} (General.{type})", MethodUtil.Get(), typeof(TDocument).Name);
     }
 
-    public virtual async ValueTask DeleteAllPagedParallel(int maxConcurrency, int pageSize = DataConstants.DefaultCosmosPageSize,
+    public override async ValueTask DeleteAllPagedParallel(int maxConcurrency, int pageSize = DataConstants.DefaultCosmosPageSize,
         CancellationToken cancellationToken = default)
     {
         System.ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
