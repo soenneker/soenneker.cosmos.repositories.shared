@@ -19,6 +19,7 @@ using Soenneker.ConcurrentProcessing.Executor;
 
 namespace Soenneker.Cosmos.Repositories.Shared;
 
+/// <inheritdoc cref="ISharedRepository{TDocument}" />
 public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>, ISharedRepository<TDocument> where TDocument : TypedDocument
 {
     protected abstract string EntityType { get; }
