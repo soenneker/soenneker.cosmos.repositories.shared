@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
+using Soenneker.Cosmos.Repository.Dtos;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Soenneker.Constants.Data;
 using Soenneker.Cosmos.Container.Abstract;
@@ -19,7 +20,6 @@ using Soenneker.ConcurrentProcessing.Executor;
 
 namespace Soenneker.Cosmos.Repositories.Shared;
 
-/// <inheritdoc cref="ISharedRepository{TDocument}" />
 public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>, ISharedRepository<TDocument> where TDocument : TypedDocument
 {
     protected abstract string EntityType { get; }
@@ -30,48 +30,50 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
     {
     }
 
-    public override async ValueTask<List<TDocument>> GetAll(double? delayMs = null, CancellationToken cancellationToken = default)
+    public override async ValueTask<List<TDocument>> GetAll(double? delayMs = null,
+        CosmosReadOptions? readOptions = null, CancellationToken cancellationToken = default)
     {
-        IQueryable<TDocument> query = await BuildQueryable(null, cancellationToken)
+        IQueryable<TDocument> query = await BuildQueryable(readOptions: readOptions, cancellationToken: cancellationToken)
             .NoSync();
 
         query = query.Where(c => c.EntityType == EntityType);
 
-        return await GetItems(query, delayMs, cancellationToken)
+        return await GetItems(query, delayMs, cancellationToken: cancellationToken)
             .NoSync();
     }
 
-    public new async ValueTask<bool> Any(CancellationToken cancellationToken = default)
+    public new async ValueTask<bool> Any(CosmosReadOptions? readOptions = null, CancellationToken cancellationToken = default)
     {
-        IQueryable<TDocument> query = await BuildQueryable(null, cancellationToken)
+        IQueryable<TDocument> query = await BuildQueryable(readOptions: readOptions, cancellationToken: cancellationToken)
             .NoSync();
 
         query = query.Where(c => c.EntityType == EntityType);
 
-        return await Exists(query, cancellationToken)
+        return await Exists(query, cancellationToken: cancellationToken)
             .NoSync();
     }
 
-    public new async ValueTask<bool> None(CancellationToken cancellationToken = default)
+    public new async ValueTask<bool> None(CosmosReadOptions? readOptions = null, CancellationToken cancellationToken = default)
     {
-        return !await Any(cancellationToken)
+        return !await Any(readOptions, cancellationToken: cancellationToken)
             .NoSync();
     }
 
-    public new async ValueTask<int> Count(CancellationToken cancellationToken = default)
+    public new async ValueTask<int> Count(CosmosReadOptions? readOptions = null, CancellationToken cancellationToken = default)
     {
-        IQueryable<TDocument> query = await BuildQueryable(null, cancellationToken)
+        IQueryable<TDocument> query = await BuildQueryable(readOptions: readOptions, cancellationToken: cancellationToken)
             .NoSync();
 
         query = query.Where(c => c.EntityType == EntityType);
 
-        return await Count(query, cancellationToken)
+        return await Count(query, cancellationToken: cancellationToken)
             .NoSync();
     }
 
-    public override async ValueTask<List<IdPartitionPair>> GetAllIds(double? delayMs = null, CancellationToken cancellationToken = default)
+    public override async ValueTask<List<IdPartitionPair>> GetAllIds(double? delayMs = null,
+        CosmosReadOptions? readOptions = null, CancellationToken cancellationToken = default)
     {
-        IQueryable<TDocument> query = await BuildQueryable(null, cancellationToken);
+        IQueryable<TDocument> query = await BuildQueryable(readOptions: readOptions, cancellationToken: cancellationToken);
 
         query = query.Where(c => c.EntityType == EntityType);
 
@@ -79,15 +81,17 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
             .NoSync();
     }
 
-    public override async ValueTask DeleteAll(double? delayMs = null, bool useQueue = false, CancellationToken cancellationToken = default)
+    public override async ValueTask DeleteAll(double? delayMs = null, bool useQueue = false,
+        CosmosWriteOptions? writeOptions = null, CancellationToken cancellationToken = default)
     {
+        EnsureUnconditionalDeleteAllowed(writeOptions);
         Logger.LogWarning("-- COSMOS: {method} (General.{type}Document) w/ {delayMs}ms delay between docs", MethodUtil.Get(), EntityType,
             delayMs.GetValueOrDefault());
 
-        List<IdPartitionPair> ids = await GetAllIds(delayMs, cancellationToken)
+        List<IdPartitionPair> ids = await GetAllIds(delayMs, cancellationToken: cancellationToken)
             .NoSync();
 
-        await DeleteIds(ids, delayMs, useQueue, cancellationToken)
+        await DeleteIds(ids, delayMs, useQueue, writeOptions, cancellationToken: cancellationToken)
             .NoSync();
 
         if (Logger.IsEnabled(LogLevel.Debug))
@@ -95,8 +99,9 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
     }
 
     public override async ValueTask DeleteAllPaged(int pageSize = DataConstants.DefaultCosmosPageSize, double? delayMs = null, bool useQueue = false,
-        CancellationToken cancellationToken = default)
+        CosmosWriteOptions? writeOptions = null, CancellationToken cancellationToken = default)
     {
+        EnsureUnconditionalDeleteAllowed(writeOptions);
         Logger.LogWarning("-- COSMOS: {method} (General.{type}) w/ {delayMs}ms delay between docs", MethodUtil.Get(), typeof(TDocument).Name,
             delayMs.GetValueOrDefault());
 
@@ -116,10 +121,10 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    await DeleteItem(result.DocumentId!, result.PartitionKey!, useQueue, cancellationToken)
+                    await DeleteItem(result.DocumentId!, result.PartitionKey!, useQueue, writeOptions, cancellationToken: cancellationToken)
                         .NoSync();
                 }
-            }, cancellationToken)
+            }, cancellationToken: cancellationToken)
             .NoSync();
 
         if (Logger.IsEnabled(LogLevel.Debug))
@@ -127,8 +132,9 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
     }
 
     public override async ValueTask DeleteAllPagedParallel(int maxConcurrency, int pageSize = DataConstants.DefaultCosmosPageSize,
-        CancellationToken cancellationToken = default)
+        CosmosWriteOptions? writeOptions = null, CancellationToken cancellationToken = default)
     {
+        EnsureUnconditionalDeleteAllowed(writeOptions);
         System.ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
 
         Microsoft.Azure.Cosmos.Container container = await Container(cancellationToken).NoSync();
@@ -147,8 +153,15 @@ public abstract class SharedRepository<TDocument> : CosmosRepository<TDocument>,
         {
             await executor.Execute(results, async (result, ct) =>
             {
-                await DeleteItemWithContainer(container, result.Id!, result.PartitionKey!, useQueue: false, ct).NoSync();
+                await DeleteItemWithContainer(container, result.Id!, result.PartitionKey!, useQueue: false, writeOptions, ct: ct).NoSync();
             }, cancellationToken).NoSync();
-        }, cancellationToken).NoSync();
+        }, cancellationToken: cancellationToken).NoSync();
     }
+
+    private void EnsureUnconditionalDeleteAllowed(CosmosWriteOptions? writeOptions)
+    {
+        if (DefaultWriteOptions?.RequireETag == true || writeOptions?.RequireETag == true)
+            throw new System.InvalidOperationException("This operation requires an ETag. Use an IfMatch method or MutateItem.");
+    }
+
 }
